@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 const (
 	WS_ENDPOINT = "ws://localhost:6767/ws"
 	LOG_FILE    = "client.log"
+	MAX_RETRIES = 5
 )
 
 var (
@@ -26,8 +28,10 @@ var (
 )
 
 var (
+	syncStats               = sync.Mutex{}
 	connectedClients        = 0
 	disconnectedClients     = 0
+	connectionRetries       = 0
 	clientsSentFirstMessage = 0
 	clientsReceivedMessage  = 0
 )
@@ -42,20 +46,39 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 3600 * time.Second,
 	}
-	conn, _, err0 := dialer.Dial(WS_ENDPOINT, http.Header{})
-	if err0 != nil {
+	var conn *websocket.Conn
+	tries := MAX_RETRIES
+	for tries > 0 {
+		var err0 error
+		conn, _, err0 = dialer.Dial(WS_ENDPOINT, http.Header{})
+		if err0 != nil {
+			tries--
+			syncStats.Lock()
+			connectionRetries++
+			syncStats.Unlock()
+			continue
+		}
+		break
+	}
+
+	if tries == 0 {
 		logger.Debug(fmt.Sprintf("client %d could not connect", c))
 		s <- c
 		return
 	}
+
+	syncStats.Lock()
 	connectedClients++
+	syncStats.Unlock()
 	err1 := conn.WriteMessage(websocket.TextMessage, []byte("{}"))
 	if err1 != nil {
 		logger.Debug(fmt.Sprintf("connection error: %v", err1))
 		s <- c
 		return
 	}
+	syncStats.Lock()
 	clientsSentFirstMessage++
+	syncStats.Unlock()
 	defer conn.Close()
 	for {
 		select {
@@ -75,7 +98,10 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 				s <- c
 				return
 			}
+			syncStats.Lock()
 			clientsReceivedMessage++
+			syncStats.Unlock()
+
 			logger.Debug(fmt.Sprintf("from client %d: %s\n", c, msg))
 		}
 	}
@@ -86,11 +112,12 @@ func printLoop() {
 		cmd := exec.Command("clear")
 		cmd.Stdout = os.Stdout
 		cmd.Run()
-		fmt.Println("Client statistics")
-		fmt.Printf("clients connected:          %d\n", connectedClients)
-		fmt.Printf("clients disconnected:       %d\n", disconnectedClients)
-		fmt.Printf("clients sent first message: %d\n", clientsSentFirstMessage)
-		fmt.Printf("clients received response:  %d\n", clientsSentFirstMessage)
+		fmt.Println("----- Stats -----")
+		fmt.Printf("connected:          %d\n", connectedClients)
+		fmt.Printf("disconnected:       %d\n", disconnectedClients)
+		fmt.Printf("connection retries: %d\n", connectionRetries)
+		fmt.Printf("sent first message: %d\n", clientsSentFirstMessage)
+		fmt.Printf("received response:  %d\n", clientsSentFirstMessage)
 		time.Sleep(2 * time.Second)
 	}
 
@@ -142,9 +169,12 @@ func main() {
 		select {
 		case clientIdx := <-syncChan:
 			logger.Debug(fmt.Sprintf("client %d was disconnected", clientIdx))
+			syncStats.Lock()
 			disconnectedClients++
+			syncStats.Unlock()
 			counter++
 		case <-sigChan:
+			fmt.Println("received exit signal")
 			close(exitChan)
 		}
 		if counter == *connectionsNumberArg {
