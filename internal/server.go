@@ -16,16 +16,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type WsConn struct {
-	Id   string
-	Conn *websocket.Conn
-}
-
 type Server struct {
 	port        string
 	server      *http.Server
 	connLock    sync.RWMutex
-	Conns       map[*websocket.Conn]*WsConn
 	epoller     *Epoll
 	exitChannel chan struct{}
 	running     sync.WaitGroup
@@ -38,7 +32,6 @@ func NewServer(port string) *Server {
 	}
 	return &Server{
 		port:        port,
-		Conns:       make(map[*websocket.Conn]*WsConn, 0),
 		epoller:     _ep,
 		exitChannel: make(chan struct{}),
 		running:     sync.WaitGroup{},
@@ -62,14 +55,6 @@ func (s *Server) handlerWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Printf("failed to add connection")
 		c.Close()
 	}
-	// go func() {
-	// 	s.connLock.Lock()
-	// 	s.Conns[c] = &WsConn{
-	// 		Id:   uuid.NewString(),
-	// 		Conn: c,
-	// 	}
-	// 	s.connLock.Unlock()
-	// }()
 }
 
 func (s *Server) handlerWrapper(handlerFunc func(http.ResponseWriter, *http.Request)) http.Handler {
@@ -96,42 +81,53 @@ func (s *Server) MainLoop() {
 				continue
 			}
 			for _, conn := range connections {
-				// s.connLock.RLock()
-				// _, ok := s.Conns[conn]
-				// s.connLock.RUnlock()
 				if conn == nil {
-					s.epoller.Remove(conn)
-					// delete(s.Conns, conn)
+					// s.epoller.Remove(conn.Conn)
 					continue
 				}
 
-				_, msg, err := conn.ReadMessage()
+				_, _, err := conn.Conn.ReadMessage()
 				if err != nil {
 					if websocket.IsUnexpectedCloseError(
 						err,
 						websocket.CloseNormalClosure,
 						websocket.CloseGoingAway,
 						websocket.CloseNoStatusReceived) {
-						log.Printf(fmt.Sprintf("error parsing message: %v", err))
+						log.Printf("error parsing message: %s", err)
 					} else {
-						log.Printf(fmt.Sprintf("connection error: %v", err))
+						log.Printf("connection error: %s", err)
 					}
-					conn.Close()
-					s.epoller.Remove(conn)
-					// delete(s.Conns, conn)
-					break
+					s.epoller.Remove(conn.Conn)
+					continue
 				}
-				// s.connLock.RLock()
-				// log.Printf(fmt.Sprintf("from client %s: %s\n", s.Conns[conn].Id, msg))
-				err1 := conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("{\"clientId\": %s}", msg)))
+				err1 := conn.Conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("{\"clientId\": %s}", conn.Id)))
 				if err1 != nil {
-					log.Printf(fmt.Sprintf("connection error: %v", err1))
+					log.Printf("connection error: %v", err1)
 				}
-				// s.connLock.RUnlock()
 			}
 		case <-s.exitChannel:
 			return
 		}
+	}
+}
+
+func (s *Server) MockServerMessages() {
+	for {
+		time.Sleep(5 * time.Second)
+		_counter := 0
+		s.epoller.Lock.Lock()
+		for _, v := range s.epoller.Connections {
+			if _counter == 1000 {
+				break // just breaking after the first 1000 messages sent from the server (map iteration has random order)
+			}
+			err0 := v.Conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("{\"clientId\": %s, \"msg\": %s}", v.Id, "hello")))
+			if err0 != nil {
+				log.Printf("error sending message to: %s", v.Id)
+				continue
+			}
+			_counter++
+		}
+		s.epoller.Lock.Unlock()
 	}
 }
 
@@ -152,6 +148,7 @@ func (s *Server) Start(exitChannel chan os.Signal) error {
 	}()
 	setLimit()
 	go s.MainLoop()
+	go s.MockServerMessages()
 
 	return nil
 }

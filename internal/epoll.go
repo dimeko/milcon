@@ -7,13 +7,19 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sys/unix"
 )
 
+type WsConn struct {
+	Id   string
+	Conn *websocket.Conn
+}
+
 type Epoll struct {
 	Fd          int
-	Connections map[int]*websocket.Conn
+	Connections map[int]*WsConn
 	Lock        *sync.RWMutex
 }
 
@@ -24,7 +30,7 @@ func NewEpoll() (*Epoll, error) {
 	}
 	return &Epoll{
 		Fd:          fd,
-		Connections: make(map[int]*websocket.Conn),
+		Connections: make(map[int]*WsConn),
 		Lock:        &sync.RWMutex{},
 	}, nil
 }
@@ -43,7 +49,10 @@ func (ep *Epoll) Add(conn *websocket.Conn) error {
 		return err
 	}
 	ep.Lock.Lock()
-	ep.Connections[fd] = conn
+	ep.Connections[fd] = &WsConn{
+		Id:   uuid.NewString(),
+		Conn: conn,
+	}
 	if len(ep.Connections)%100 == 0 {
 		log.Printf("Total number of connections: %v", len(ep.Connections))
 	}
@@ -74,7 +83,7 @@ func (ep *Epoll) Remove(conn *websocket.Conn) error {
 	return nil
 }
 
-func (ep *Epoll) Wait() ([]*websocket.Conn, error) {
+func (ep *Epoll) Wait() ([]*WsConn, error) {
 	events := make([]unix.EpollEvent, 100)
 	n, err := unix.EpollWait(
 		ep.Fd,
@@ -87,7 +96,7 @@ func (ep *Epoll) Wait() ([]*websocket.Conn, error) {
 	}
 	ep.Lock.RLock()
 	defer ep.Lock.RUnlock()
-	var connections []*websocket.Conn
+	var connections []*WsConn
 	for i := 0; i < n; i++ {
 		connections = append(connections, ep.Connections[int(events[i].Fd)])
 	}

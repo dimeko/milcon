@@ -97,7 +97,6 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	for {
 		select {
 		case <-exitChan:
-			conn.Close()
 			s <- c
 			return
 		default:
