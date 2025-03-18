@@ -58,7 +58,7 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 		}
 	}()
 	dialer := websocket.Dialer{
-		HandshakeTimeout: 3600 * time.Second,
+		HandshakeTimeout: 60 * time.Second,
 	}
 	var conn *websocket.Conn
 	tries := MAX_RETRIES
@@ -122,18 +122,24 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	}
 }
 
-func printLoop() {
+func printLoop(exitChan <-chan struct{}) {
 	for {
-		cmd := exec.Command("clear")
-		cmd.Stdout = os.Stdout
-		cmd.Run()
-		fmt.Println("----- Stats -----")
-		fmt.Printf("connected:          %d\n", connectedClients)
-		fmt.Printf("disconnected:       %d\n", disconnectedClients)
-		fmt.Printf("connection retries: %d\n", connectionRetries)
-		fmt.Printf("sent first message: %d\n", clientsSentFirstMessage)
-		fmt.Printf("received response:  %d\n", clientsSentFirstMessage)
-		time.Sleep(2 * time.Second)
+		select {
+		case <-exitChan:
+			return
+		default:
+			cmd := exec.Command("clear")
+			cmd.Stdout = os.Stdout
+			cmd.Run()
+			fmt.Println("----- Stats -----")
+			fmt.Printf("connected:          %d\n", connectedClients)
+			fmt.Printf("disconnected:       %d\n", disconnectedClients)
+			fmt.Printf("connection retries: %d\n", connectionRetries)
+			fmt.Printf("sent first message: %d\n", clientsSentFirstMessage)
+			fmt.Printf("received response:  %d\n", clientsSentFirstMessage)
+			time.Sleep(2 * time.Second)
+		}
+
 	}
 
 }
@@ -146,8 +152,9 @@ func main() {
 	)
 
 	flag.Parse()
+	exitChan := make(chan struct{})
+	go printLoop(exitChan)
 	setLimit()
-	go printLoop()
 
 	wsUrl = *websocketsUrlArg
 
@@ -178,11 +185,9 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 
 	syncChan := make(chan int, *connectionsNumberArg)
-	exitChan := make(chan struct{})
 	for i := 0; i < *connectionsNumberArg; i++ {
 		go connect(i, syncChan, exitChan)
 	}
-
 	counter := 0
 	for {
 		select {
