@@ -37,6 +37,19 @@ var (
 	clientsReceivedMessage  = 0
 )
 
+func setLimit() {
+	var rLimit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit); err != nil {
+		panic(err)
+	}
+	rLimit.Cur = rLimit.Max
+	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit); err != nil {
+		panic(err)
+	}
+
+	log.Printf("set cur limit: %d", rLimit.Cur)
+}
+
 func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -132,6 +145,7 @@ func main() {
 	)
 
 	flag.Parse()
+	setLimit()
 	go printLoop()
 
 	wsUrl = *websocketsUrlArg
