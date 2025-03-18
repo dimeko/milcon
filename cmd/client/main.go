@@ -97,6 +97,7 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	for {
 		select {
 		case <-exitChan:
+			conn.Close()
 			s <- c
 			return
 		default:
@@ -192,7 +193,7 @@ func main() {
 			syncStats.Unlock()
 			counter++
 		case <-sigChan:
-			fmt.Println("received exit signal")
+			fmt.Println("exiting, bye ...")
 			close(exitChan)
 		}
 		if counter == *connectionsNumberArg {
