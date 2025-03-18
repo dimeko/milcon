@@ -12,4 +12,4 @@ rs: bs
 	./bin/server
 
 rc: bc
-	./bin/client -v -n $(CONN_NUM)
+	./bin/client -v -n $(CONN_NUM) -u $(WS_URL)

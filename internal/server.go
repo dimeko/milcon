@@ -139,7 +139,7 @@ func (s *Server) Start(exitChannel chan os.Signal) error {
 	r := mux.NewRouter()
 	r.Handle("/ws", s.handlerWrapper(s.handlerWebSocket))
 	s.server = &http.Server{
-		Addr:    "localhost:" + s.port,
+		Addr:    ":" + s.port,
 		Handler: handlers.CombinedLoggingHandler(os.Stdout, r),
 	}
 

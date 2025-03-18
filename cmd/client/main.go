@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	WS_ENDPOINT = "ws://localhost:6767/ws"
-	LOG_FILE    = "client.log"
-	MAX_RETRIES = 5
+	DEFAULT_WS_URL = "ws://localhost:6767/ws"
+	LOG_FILE       = "client.log"
+	MAX_RETRIES    = 5
 )
 
 var (
 	verbose = false
+	wsUrl   = ""
 	logger  *slog.Logger
 )
 
@@ -50,7 +51,7 @@ func connect(c int, s chan<- int, exitChan <-chan struct{}) {
 	tries := MAX_RETRIES
 	for tries > 0 {
 		var err0 error
-		conn, _, err0 = dialer.Dial(WS_ENDPOINT, http.Header{})
+		conn, _, err0 = dialer.Dial(wsUrl, http.Header{})
 		if err0 != nil {
 			tries--
 			syncStats.Lock()
@@ -126,11 +127,14 @@ func printLoop() {
 func main() {
 	var (
 		connectionsNumberArg = flag.Int("n", 1, "determine the number of parallel connections")
+		websocketsUrlArg     = flag.String("u", DEFAULT_WS_URL, "determine the full url of the server")
 		verboseArg           = flag.Bool("v", false, "log more information e.g. messages received")
 	)
 
 	flag.Parse()
 	go printLoop()
+
+	wsUrl = *websocketsUrlArg
 
 	if *connectionsNumberArg <= 0 {
 		log.Fatal("Number of connections must be a positive number")
